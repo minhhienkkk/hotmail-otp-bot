@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import random
 import requests
 from datetime import datetime
@@ -17,39 +16,6 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-USERS_FILE = 'users.json'
-
-# --- HÀM XỬ LÝ USER (LƯU & ĐỌC JSON) ---
-def load_users():
-    """Đọc danh sách user đã lưu"""
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
-
-def save_user(chat_id, username):
-    """Lưu user mới vào file nếu chưa có"""
-    users = load_users()
-    if str(chat_id) not in users:
-        users[str(chat_id)] = username
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(users, f, ensure_ascii=False, indent=4)
-
-# --- HÀM GỬI TIN NHẮN KHI BOT KHỞI ĐỘNG ---
-async def post_init(application: Application):
-    """Hàm này tự động chạy 1 lần duy nhất khi bot vừa bật"""
-    users = load_users()
-    success = 0
-    for chat_id, username in users.items():
-        try:
-            await application.bot.send_message(
-                chat_id=chat_id, 
-                text=f"👋 Xin chào {username}, bot vừa mới được khởi động lại!"
-            )
-            success += 1
-        except Exception as e:
-            print(f"Không thể gửi cho {chat_id}: {e}")
-    print(f"Đã gửi tin nhắn chào mừng tới {success}/{len(users)} users.")
 
 # --- HÀM TẠO PASSWORD ---
 WORDS = ["Tiger", "Ocean", "River", "Falcon", "Dragon", "Coffee", "Crystal", "Shadow", "Thunder", "Rocket", "Silver", "Golden", "Cosmic", "Quantum", "Cyber", "Ninja", "Phoenix", "Galaxy", "Neon", "Mango"]
@@ -81,12 +47,73 @@ def find_higgsfield_code(data):
 
 # --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Lưu user khi họ gõ /start
-    save_user(update.effective_chat.id, update.effective_user.first_name)
-    await update.message.reply_text("👋 Chào bạn! Gửi file .txt để import hoặc gõ /get để lấy tài khoản.")
+    text = (
+        "👋 **Hệ thống Quản lý Higgsfield Bot**\n\n"
+        "Các lệnh hỗ trợ:\n"
+        "📎 Gửi file `.txt` để import acc.\n"
+        "📥 `/get` - Lấy 1 tài khoản mới.\n"
+        "📊 `/stats` - Xem thống kê kho acc.\n"
+        "🔍 `/search <email>` - Tìm nhanh acc."
+    )
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Thống kê lượng tài khoản trong Database"""
+    try:
+        # Lấy toàn bộ data (chỉ lấy id để nhẹ truy vấn)
+        res_all = supabase.table("accounts").select("id").execute()
+        res_used = supabase.table("accounts").select("id").eq("is_used", True).execute()
+        res_unused = supabase.table("accounts").select("id").eq("is_used", False).execute()
+        
+        total = len(res_all.data) if res_all.data else 0
+        used = len(res_used.data) if res_used.data else 0
+        unused = len(res_unused.data) if res_unused.data else 0
+
+        text = (
+            f"📊 **THỐNG KÊ KHO TÀI KHOẢN**\n\n"
+            f"🔹 Tổng số acc: `{total}`\n"
+            f"🟢 Chưa dùng: `{unused}`\n"
+            f"🔴 Đã dùng: `{used}`"
+        )
+        await update.message.reply_text(text, parse_mode='Markdown')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi truy xuất thống kê: {str(e)}")
+
+async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tìm kiếm tài khoản bằng vài chữ cái đầu của email"""
+    if not context.args:
+        await update.message.reply_text("⚠️ Vui lòng nhập từ khóa tìm kiếm.\n👉 Cú pháp: `/search <từ_khóa>`")
+        return
+
+    keyword = context.args[0]
+    try:
+        # Dùng ilike để tìm email bắt đầu bằng từ khóa (không phân biệt hoa/thường)
+        response = supabase.table("accounts").select("*").ilike("email", f"{keyword}%").limit(1).execute()
+        accounts = response.data
+
+        if not accounts:
+            await update.message.reply_text(f"❌ Không tìm thấy email nào bắt đầu bằng `{keyword}`")
+            return
+
+        acc = accounts[0]
+        status = "🔴 Đã sử dụng" if acc['is_used'] else "🟢 Chưa sử dụng"
+        
+        # Nút lấy chuỗi định dạng cũ
+        keyboard = [[InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        text = (
+            f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n"
+            f"📧 `{acc['email']}`\n"
+            f"🔑 `{acc['password']}`\n"
+            f"📌 Trạng thái: {status}"
+        )
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi tìm kiếm: {str(e)}")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    save_user(update.effective_chat.id, update.effective_user.first_name)
     document = update.message.document
     if not document.file_name.endswith('.txt'):
         return await update.message.reply_text("❌ Vui lòng gửi file .txt")
@@ -115,7 +142,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"❌ Lỗi: {str(e)}")
 
 async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    save_user(update.effective_chat.id, update.effective_user.first_name)
     try:
         response = supabase.table("accounts").select("*").eq("is_used", False).limit(1).execute()
         accounts = response.data
@@ -128,7 +154,6 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Form hiển thị mới theo ảnh
         text = (
             f"✅ **Higgsfield**\n\n"
             f"📧 `{acc['email']}`\n"
@@ -141,13 +166,29 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("Đang lấy mã...")
-    
     data = query.data
+
+    # 1. Nút Lấy định dạng copy (từ lệnh /search)
+    if data.startswith("raw_"):
+        await query.answer("Đang lấy dữ liệu...")
+        acc_id = data.split("_")[1]
+        response = supabase.table("accounts").select("*").eq("id", acc_id).execute()
+        
+        if not response.data:
+            return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
+            
+        acc = response.data[0]
+        raw_format = f"{acc['email']}|{acc['password']}|{acc['refresh_token']}|{acc['client_id']}"
+        
+        # In ra dưới dạng code (tick ngược) để người dùng chạm vào là copy ngay
+        await query.message.reply_text(f"`{raw_format}`", parse_mode='Markdown')
+        return
+
+    # 2. Nút Lấy code Higgsfield (từ lệnh /get)
     if data.startswith("getcode_"):
+        await query.answer("Đang lấy mã...")
         acc_id = data.split("_")[1]
         
-        # Cập nhật regex để lấy đúng pass Higgsfield theo form mới (tìm sau icon 🔐)
         current_text = query.message.text
         hf_pass_match = re.search(r'🔐\s*(\S+)', current_text)
         hf_pass = hf_pass_match.group(1) if hf_pass_match else generate_hf_password()
@@ -201,11 +242,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 def main():
-    # Thêm hàm post_init vào quá trình build
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    # Khởi tạo gọn gàng, bỏ post_init
+    app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("get", get_account))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("search", search_account))
+    
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(button_callback))
 
