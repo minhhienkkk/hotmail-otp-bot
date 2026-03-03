@@ -1,0 +1,10 @@
+# Bỏ qua file chứa key bảo mật
+.env
+
+# Bỏ qua các file rác của Python
+__pycache__/
+*.pyc
+
+# Bỏ qua thư mục môi trường ảo (nếu bạn có dùng)
+venv/
+env/
