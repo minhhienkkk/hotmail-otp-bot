@@ -1,57 +1,97 @@
 import os
 import re
+import json
+import random
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from supabase import create_client, Client
-from datetime import datetime
-import random
 
-# Danh sách các từ có nghĩa để ghép mật khẩu
-WORDS = ["Tiger", "Ocean", "River", "Falcon", "Dragon", "Coffee", "Crystal", "Shadow", "Thunder", "Rocket", "Silver", "Golden", "Cosmic", "Quantum", "Cyber", "Ninja", "Phoenix", "Galaxy", "Neon", "Mango"]
-
-def generate_hf_password():
-    """Tạo password > 10 kí tự: 2 từ có nghĩa + số + kí tự đặc biệt"""
-    word1 = random.choice(WORDS)
-    word2 = random.choice(WORDS)
-    while word1 == word2: # Đảm bảo 2 từ không bị trùng nhau
-        word2 = random.choice(WORDS)
-    
-    number = str(random.randint(10, 999)) # 2 đến 3 số ngẫu nhiên
-    special_char = random.choice("!@#$%^&*")
-    
-    return f"{word1}{word2}{number}{special_char}"
-
-# Tải các biến môi trường từ file .env
+# Tải biến môi trường
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-# Khởi tạo Supabase Client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+USERS_FILE = 'users.json'
 
+# --- HÀM XỬ LÝ USER (LƯU & ĐỌC JSON) ---
+def load_users():
+    """Đọc danh sách user đã lưu"""
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_user(chat_id, username):
+    """Lưu user mới vào file nếu chưa có"""
+    users = load_users()
+    if str(chat_id) not in users:
+        users[str(chat_id)] = username
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users, f, ensure_ascii=False, indent=4)
+
+# --- HÀM GỬI TIN NHẮN KHI BOT KHỞI ĐỘNG ---
+async def post_init(application: Application):
+    """Hàm này tự động chạy 1 lần duy nhất khi bot vừa bật"""
+    users = load_users()
+    success = 0
+    for chat_id, username in users.items():
+        try:
+            await application.bot.send_message(
+                chat_id=chat_id, 
+                text=f"👋 Xin chào {username}, bot vừa mới được khởi động lại!"
+            )
+            success += 1
+        except Exception as e:
+            print(f"Không thể gửi cho {chat_id}: {e}")
+    print(f"Đã gửi tin nhắn chào mừng tới {success}/{len(users)} users.")
+
+# --- HÀM TẠO PASSWORD ---
+WORDS = ["Tiger", "Ocean", "River", "Falcon", "Dragon", "Coffee", "Crystal", "Shadow", "Thunder", "Rocket", "Silver", "Golden", "Cosmic", "Quantum", "Cyber", "Ninja", "Phoenix", "Galaxy", "Neon", "Mango"]
+
+def generate_hf_password():
+    word1 = random.choice(WORDS)
+    word2 = random.choice(WORDS)
+    while word1 == word2:
+        word2 = random.choice(WORDS)
+    number = str(random.randint(10, 999))
+    special_char = random.choice("!@#$%^&*")
+    return f"{word1}{word2}{number}{special_char}"
+
+# --- HÀM TÌM CODE HIGGSFIELD ---
+def find_higgsfield_code(data):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            result = find_higgsfield_code(value)
+            if result: return result
+    elif isinstance(data, list):
+        for item in data:
+            result = find_higgsfield_code(item)
+            if result: return result
+    elif isinstance(data, str):
+        if 'higgsfield' in data.lower():
+            match = re.search(r'\b\d{6}\b', data)
+            if match: return match.group(0)
+    return None
+
+# --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý lệnh /start"""
-    await update.message.reply_text(
-        "👋 Chào bạn!\n\n"
-        "📎 Gửi file .txt (định dạng `email|pass|token|client_id`) để import.\n"
-        "📥 Gõ /get để lấy tài khoản chưa sử dụng."
-    )
+    # Lưu user khi họ gõ /start
+    save_user(update.effective_chat.id, update.effective_user.first_name)
+    await update.message.reply_text("👋 Chào bạn! Gửi file .txt để import hoặc gõ /get để lấy tài khoản.")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý file .txt người dùng gửi lên"""
+    save_user(update.effective_chat.id, update.effective_user.first_name)
     document = update.message.document
-    
-    # Chỉ nhận file .txt
     if not document.file_name.endswith('.txt'):
-        await update.message.reply_text("❌ Vui lòng gửi file có định dạng .txt")
-        return
+        return await update.message.reply_text("❌ Vui lòng gửi file .txt")
 
     status_msg = await update.message.reply_text("⏳ Đang xử lý file...")
-    
     try:
         file = await context.bot.get_file(document.file_id)
         file_bytes = await file.download_as_bytearray()
@@ -62,183 +102,114 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = line.strip().split('|')
             if len(parts) == 4:
                 records_to_insert.append({
-                    "email": parts[0],
-                    "password": parts[1],
-                    "refresh_token": parts[2],
-                    "client_id": parts[3],
+                    "email": parts[0], "password": parts[1],
+                    "refresh_token": parts[2], "client_id": parts[3],
                     "is_used": False
                 })
-                
         if records_to_insert:
-            # Thêm dữ liệu vào Supabase
             supabase.table("accounts").insert(records_to_insert).execute()
-            await status_msg.edit_text(f"✅ Đã import thành công {len(records_to_insert)} tài khoản vào cơ sở dữ liệu.")
+            await status_msg.edit_text(f"✅ Đã import {len(records_to_insert)} acc.")
         else:
-            await status_msg.edit_text("❌ Không tìm thấy dòng nào đúng định dạng (email|pass|token|client_id).")
-            
+            await status_msg.edit_text("❌ Không tìm thấy dòng đúng định dạng.")
     except Exception as e:
-        await status_msg.edit_text(f"❌ Lỗi khi xử lý: {str(e)}")
+        await status_msg.edit_text(f"❌ Lỗi: {str(e)}")
 
 async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý lệnh /get"""
+    save_user(update.effective_chat.id, update.effective_user.first_name)
     try:
-        # Lấy 1 tài khoản chưa sử dụng
         response = supabase.table("accounts").select("*").eq("is_used", False).limit(1).execute()
         accounts = response.data
-        
         if not accounts:
-            await update.message.reply_text("⚠️ Đã hết tài khoản khả dụng trong hệ thống!")
-            return
+            return await update.message.reply_text("⚠️ Hết tài khoản khả dụng!")
             
         acc = accounts[0]
-        
-        # Tạo password Higgsfield mới
         hf_pass = generate_hf_password()
         
-        # Nút bấm lấy code
-        keyboard = [
-            [InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")]
-        ]
+        keyboard = [[InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        # Form hiển thị mới theo ảnh
         text = (
-            f"📧 **Email:** `{acc['email']}`\n"
-            f"🔑 **Password Email:** `{acc['password']}`\n"
-            f"🔐 **Password Higgsfield:** `{hf_pass}`"
+            f"✅ **Higgsfield**\n\n"
+            f"📧 `{acc['email']}`\n"
+            f"🔑 `{acc['password']}`\n"
+            f"🔐 `{hf_pass}`"
         )
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-        
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi truy xuất DB: {str(e)}")
-def find_higgsfield_code(data):
-    """
-    Hàm lục lọi toàn bộ cấu trúc JSON.
-    Nếu tìm thấy chuỗi nào chứa chữ 'higgsfield' (không phân biệt hoa thường),
-    nó sẽ dùng regex để bóc tách 6 số trong chuỗi đó.
-    """
-    if isinstance(data, dict):
-        for key, value in data.items():
-            result = find_higgsfield_code(value)
-            if result: 
-                return result
-    elif isinstance(data, list):
-        for item in data:
-            result = find_higgsfield_code(item)
-            if result: 
-                return result
-    elif isinstance(data, str):
-        # Chuyển string về chữ thường để dễ so sánh
-        text_lower = data.lower()
-        if 'higgsfield' in text_lower:
-            # Nếu tin nhắn này của Higgsfield, mới bắt đầu tìm 6 số
-            match = re.search(r'\b\d{6}\b', data)
-            if match:
-                return match.group(0)
-    return None
+        await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý nút bấm lấy code"""
     query = update.callback_query
-    await query.answer("Đang request API lấy code, vui lòng chờ...")
+    await query.answer("Đang lấy mã...")
     
     data = query.data
     if data.startswith("getcode_"):
         acc_id = data.split("_")[1]
         
-        # --- PHẦN MỚI: Trích xuất lại mật khẩu Higgsfield cũ từ tin nhắn để không bị đổi ---
+        # Cập nhật regex để lấy đúng pass Higgsfield theo form mới (tìm sau icon 🔐)
         current_text = query.message.text
-        hf_pass_match = re.search(r'Password Higgsfield:\s*(\S+)', current_text)
+        hf_pass_match = re.search(r'🔐\s*(\S+)', current_text)
         hf_pass = hf_pass_match.group(1) if hf_pass_match else generate_hf_password()
-        # ----------------------------------------------------------------------------------
 
-        # Lấy lại thông tin acc để lấy token và client_id
         response = supabase.table("accounts").select("*").eq("id", acc_id).execute()
         if not response.data:
-            await query.edit_message_text("❌ Không tìm thấy tài khoản này trong hệ thống.")
-            return
+            return await query.edit_message_text("❌ Không tìm thấy tài khoản.")
             
         acc = response.data[0]
-        
-        # Gọi API
         api_url = "https://tools.dongvanfb.net/api/get_messages_oauth2"
-        payload = {
-            "email": acc['email'],
-            "refresh_token": acc['refresh_token'],
-            "client_id": acc['client_id']
-        }
+        payload = {"email": acc['email'], "refresh_token": acc['refresh_token'], "client_id": acc['client_id']}
         
         try:
             api_res = requests.post(api_url, json=payload, timeout=20)
-            result_json = api_res.json()
-            
-            # Sử dụng hàm quét thông minh thay vì regex toàn bộ
-            code = find_higgsfield_code(result_json)
+            code = find_higgsfield_code(api_res.json())
             
             if code:
-                # Đánh dấu đã sử dụng
                 supabase.table("accounts").update({"is_used": True}).eq("id", acc_id).execute()
-                
                 new_text = (
-                    f"📧 **Email:** `{acc['email']}`\n"
-                    f"🔑 **Password Email:** `{acc['password']}`\n"
-                    f"🔐 **Password Higgsfield:** `{hf_pass}`\n"
+                    f"✅ **Higgsfield**\n\n"
+                    f"📧 `{acc['email']}`\n"
+                    f"🔑 `{acc['password']}`\n"
+                    f"🔐 `{hf_pass}`\n"
                     f"✅ **Code:** `{code}`\n\n"
-                    f"*(Tài khoản đã được cập nhật thành 'đã sử dụng')*"
+                    f"*(Acc đã chuyển trạng thái sử dụng)*"
                 )
                 await query.edit_message_text(new_text, parse_mode='Markdown')
             else:
-                # Lấy thời gian hiện tại
                 current_time = datetime.now().strftime("%H:%M:%S")
-                
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]
-                ]
+                keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                
                 await query.edit_message_text(
-                    f"📧 **Email:** `{acc['email']}`\n"
-                    f"🔑 **Password Email:** `{acc['password']}`\n"
-                    f"🔐 **Password Higgsfield:** `{hf_pass}`\n"
-                    f"⚠️ **Trạng thái:** Chưa tìm thấy mã 6 số từ Higgsfield.\n"
-                    f"⏳ *Email có thể đến chậm, vui lòng đợi vài giây rồi bấm thử lại.*\n\n"
-                    f"⏱️ *Lần check cuối: {current_time}*",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
+                    f"✅ **Higgsfield**\n\n"
+                    f"📧 `{acc['email']}`\n"
+                    f"🔑 `{acc['password']}`\n"
+                    f"🔐 `{hf_pass}`\n\n"
+                    f"⚠️ *Chưa thấy mã. Lần check: {current_time}*",
+                    reply_markup=reply_markup, parse_mode='Markdown'
                 )
-                
         except requests.exceptions.RequestException as e:
             current_time = datetime.now().strftime("%H:%M:%S")
-            keyboard = [
-                [InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]
-            ]
+            keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                f"❌ Call API thất bại: {str(e)}\n"
-                f"🔐 **Password Higgsfield:** `{hf_pass}`\n\n"
-                f"⏱️ *Lần check cuối: {current_time}*", 
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
+                f"✅ **Higgsfield**\n\n"
+                f"📧 `{acc['email']}`\n"
+                f"🔑 `{acc['password']}`\n"
+                f"🔐 `{hf_pass}`\n\n"
+                f"❌ *Lỗi API. Lần check: {current_time}*", 
+                reply_markup=reply_markup, parse_mode='Markdown'
             )
-                
-        except requests.exceptions.RequestException as e:
-            keyboard = [
-                [InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                f"❌ Call API thất bại: {str(e)}\n🔐 **Password Higgsfield:** `{hf_pass}`", 
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
+
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Thêm hàm post_init vào quá trình build
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("get", get_account))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    print("🤖 Bot Telegram đang hoạt động...")
+    print("🤖 Bot đang hoạt động...")
     app.run_polling()
 
 if __name__ == "__main__":
