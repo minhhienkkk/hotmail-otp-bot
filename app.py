@@ -178,8 +178,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
             
         acc = response.data[0]
-        copy_text = f"`📧 {acc['email']}\n🔑 {acc['password']}`"
-        
+        copy_text = f"```text\n{acc['email']}\n{acc['password']}\n```"
         await query.message.reply_text(copy_text, parse_mode='Markdown')
         return
 
