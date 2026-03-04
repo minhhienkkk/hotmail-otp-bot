@@ -60,7 +60,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Thống kê lượng tài khoản trong Database"""
     try:
-        # Lấy toàn bộ data (chỉ lấy id để nhẹ truy vấn)
         res_all = supabase.table("accounts").select("id").execute()
         res_used = supabase.table("accounts").select("id").eq("is_used", True).execute()
         res_unused = supabase.table("accounts").select("id").eq("is_used", False).execute()
@@ -87,7 +86,6 @@ async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyword = context.args[0]
     try:
-        # Dùng ilike để tìm email bắt đầu bằng từ khóa (không phân biệt hoa/thường)
         response = supabase.table("accounts").select("*").ilike("email", f"{keyword}%").limit(1).execute()
         accounts = response.data
 
@@ -98,7 +96,6 @@ async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         acc = accounts[0]
         status = "🔴 Đã sử dụng" if acc['is_used'] else "🟢 Chưa sử dụng"
         
-        # Nút lấy chuỗi định dạng cũ
         keyboard = [[InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -151,7 +148,10 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         acc = accounts[0]
         hf_pass = generate_hf_password()
         
-        keyboard = [[InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")]]
+        keyboard = [
+            [InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")],
+            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         text = (
@@ -168,7 +168,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
 
-    # 1. Nút Lấy định dạng copy (từ lệnh /search)
+    # --- Nút Copy Email & Pass (chạm để copy) ---
+    if data.startswith("copyep_"):
+        await query.answer("Đang tạo đoạn copy...")
+        acc_id = data.split("_")[1]
+        
+        response = supabase.table("accounts").select("email, password").eq("id", acc_id).execute()
+        if not response.data:
+            return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
+            
+        acc = response.data[0]
+        copy_text = f"`📧 {acc['email']}\n🔑 {acc['password']}`"
+        
+        await query.message.reply_text(copy_text, parse_mode='Markdown')
+        return
+
+    # --- Nút Lấy định dạng copy nguyên bản (từ lệnh /search) ---
     if data.startswith("raw_"):
         await query.answer("Đang lấy dữ liệu...")
         acc_id = data.split("_")[1]
@@ -179,12 +194,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         acc = response.data[0]
         raw_format = f"{acc['email']}|{acc['password']}|{acc['refresh_token']}|{acc['client_id']}"
-        
-        # In ra dưới dạng code (tick ngược) để người dùng chạm vào là copy ngay
         await query.message.reply_text(f"`{raw_format}`", parse_mode='Markdown')
         return
 
-    # 2. Nút Lấy code Higgsfield (từ lệnh /get)
+    # --- Nút Lấy code Higgsfield ---
     if data.startswith("getcode_"):
         await query.answer("Đang lấy mã...")
         acc_id = data.split("_")[1]
@@ -215,10 +228,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"✅ **Code:** `{code}`\n\n"
                     f"*(Acc đã chuyển trạng thái sử dụng)*"
                 )
-                await query.edit_message_text(new_text, parse_mode='Markdown')
+                keyboard = [[InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(new_text, reply_markup=reply_markup, parse_mode='Markdown')
+                
             else:
                 current_time = datetime.now().strftime("%H:%M:%S")
-                keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]]
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")],
+                    [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]
+                ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
                     f"✅ **Higgsfield**\n\n"
@@ -228,9 +247,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"⚠️ *Chưa thấy mã. Lần check: {current_time}*",
                     reply_markup=reply_markup, parse_mode='Markdown'
                 )
+                
         except requests.exceptions.RequestException as e:
             current_time = datetime.now().strftime("%H:%M:%S")
-            keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")]]
+            keyboard = [
+                [InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")],
+                [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 f"✅ **Higgsfield**\n\n"
@@ -242,7 +265,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 def main():
-    # Khởi tạo gọn gàng, bỏ post_init
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
