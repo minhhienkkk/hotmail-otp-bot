@@ -169,6 +169,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     # --- Nút Copy Email & Pass (chạm để copy) ---
+
     if data.startswith("copyep_"):
         await query.answer("Đang tạo đoạn copy...")
         acc_id = data.split("_")[1]
@@ -178,10 +179,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
             
         acc = response.data[0]
-        copy_text = f"```text\n{acc['email']}\n{acc['password']}\n```"
-        await query.message.reply_text(copy_text, parse_mode='Markdown')
+        
+        # Dùng 3 dấu ` (triple backticks) để bọc toàn bộ thành 1 khối copy duy nhất
+        copy_text = f"```text\n📧 {acc['email']}\n🔑 {acc['password']}\n```"
+        
+        await query.message.reply_text(copy_text, parse_mode='MarkdownV2')
         return
-
     # --- Nút Lấy định dạng copy nguyên bản (từ lệnh /search) ---
     if data.startswith("raw_"):
         await query.answer("Đang lấy dữ liệu...")
