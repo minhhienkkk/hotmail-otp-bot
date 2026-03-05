@@ -96,7 +96,12 @@ async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         acc = accounts[0]
         status = "🔴 Đã sử dụng" if acc['is_used'] else "🟢 Chưa sử dụng"
         
-        keyboard = [[InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]]
+        # --- THÊM NÚT GET CODE VÀ COPY VÀO LỆNH SEARCH ---
+        keyboard = [
+            [InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")],
+            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
+            [InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         text = (
@@ -222,15 +227,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if code:
                 supabase.table("accounts").update({"is_used": True}).eq("id", acc_id).execute()
+                
+                # Thêm thời gian để biết bot có check lại mã mới hay không
+                current_time = datetime.now().strftime("%H:%M:%S")
+                
                 new_text = (
                     f"✅ **Higgsfield**\n\n"
                     f"📧 `{acc['email']}`\n"
                     f"🔑 `{acc['password']}`\n"
                     f"🔐 `{hf_pass}`\n"
                     f"✅ **Code:** `{code}`\n\n"
-                    f"*(Acc đã chuyển trạng thái sử dụng)*"
+                    f"⏱️ *Cập nhật lúc: {current_time}*"
                 )
-                keyboard = [[InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
+                
+                # --- GIỮ LẠI NÚT LẤY MÃ LẦN NỮA ---
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Lấy mã lần nữa", callback_data=f"getcode_{acc_id}")],
+                    [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]
+                ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(new_text, reply_markup=reply_markup, parse_mode='Markdown')
                 
