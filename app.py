@@ -64,6 +64,7 @@ def generate_hf_password():
     special_char = random.choice("!@#$%^&*")
     return f"{word1}{word2}{number}{special_char}"
 
+# --- HÀM TÌM CODE HIGGSFIELD (CÓ LOG ĐỂ BẮT BỆNH) ---
 def find_higgsfield_code(data):
     if isinstance(data, dict):
         for value in data.values():
@@ -73,9 +74,17 @@ def find_higgsfield_code(data):
         for item in data:
             result = find_higgsfield_code(item)
             if result: return result
-    elif isinstance(data, str) and 'higgsfield' in data.lower():
-        match = re.search(r'\b\d{6}\b', data)
-        if match: return match.group(0)
+    elif isinstance(data, str):
+        text_lower = data.lower()
+        if 'higgsfield' in text_lower:
+            match = re.search(r'\b\d{6}\b', data)
+            if match:
+                # IN RA TERMINAL ĐỂ KIỂM TRA
+                print("\n" + "="*50)
+                print(f"🔍 TÌM THẤY SỐ '{match.group(0)}' TRONG ĐOẠN TEXT:")
+                print(data)
+                print("="*50 + "\n")
+                return match.group(0)
     return None
 
 # --- HANDLERS ---
