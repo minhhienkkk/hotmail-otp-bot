@@ -3,7 +3,7 @@ import re
 import json
 import random
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -263,7 +263,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             api_res = requests.post(api_url, json=payload, timeout=20)
             code = find_higgsfield_code(api_res.json())
-            current_time = datetime.now().strftime("%H:%M:%S")
+            
+            # Khởi tạo múi giờ UTC+7
+            vn_tz = timezone(timedelta(hours=7))
+            current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
             
             keyboard = [
                 [InlineKeyboardButton("🔄 Lấy mã lần nữa", callback_data=f"getcode_{acc_id}")],
@@ -281,7 +284,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                               reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
                 
         except requests.exceptions.RequestException as e:
-            current_time = datetime.now().strftime("%H:%M:%S")
+            # Khởi tạo múi giờ UTC+7 cho khối lỗi
+            vn_tz = timezone(timedelta(hours=7))
+            current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
+            
             keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")],
                         [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
             await query.edit_message_text(f"✅ **Higgsfield**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
