@@ -16,7 +16,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-PROXY_URL = os.getenv("PROXY_URL") # Hỗ trợ Proxy nếu chạy trên Railway bị chặn IP
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -197,7 +196,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
-# --- LỆNH XUẤT FILE (EXPORT) ---
 async def export_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id): return
     if not context.args or context.args[0] not in ['used', 'unused', 'all']:
@@ -240,7 +238,6 @@ async def export_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await status_msg.edit_text(f"❌ Lỗi xuất file: {str(e)}")
 
-# --- LỆNH DỌN DẸP (CLEAN) ---
 async def clean_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id): return
     if not context.args or context.args[0] not in ['used', 'unused']:
@@ -252,14 +249,12 @@ async def clean_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("⏳ Đang tiến hành dọn dẹp Database...")
 
     try:
-        # Lấy số lượng trước khi xóa để báo cáo
         res = supabase.table("accounts").select("id", count="exact").eq("is_used", is_used_val).execute()
         count = res.count if res.count else 0
 
         if count == 0:
             return await status_msg.edit_text(f"📂 Không có tài khoản `{clean_type}` nào để xóa.")
 
-        # Gọi API xóa hàng loạt
         supabase.table("accounts").delete().eq("is_used", is_used_val).execute()
         
         status_vn = "CHƯA DÙNG" if not is_used_val else "ĐÃ DÙNG"
@@ -275,7 +270,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for idx, u_id in enumerate(users, 1): text += f"{idx}. ID: `{u_id}`\n"
     await update.message.reply_text(text, parse_mode='Markdown')
 
-# --- XỬ LÝ NÚT BẤM (CÓ UTC+7 VÀ BẮT LỖI MẠNG) ---
+# --- XỬ LÝ NÚT BẤM ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
@@ -366,11 +361,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                           reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 def main():
-    # Cấu hình mạng lỏng hơn và gắn Proxy (Nếu có) để chống Timeout
+    # Cấu hình mạng lỏng hơn để chống Timeout (đã gỡ bỏ Proxy)
     trequest = HTTPXRequest(
         connection_pool_size=8,
-        read_timeout=30, write_timeout=30, connect_timeout=30, pool_timeout=30,
-        proxy_url=PROXY_URL if PROXY_URL else None
+        read_timeout=30, write_timeout=30, connect_timeout=30, pool_timeout=30
     )
     
     app = Application.builder().token(BOT_TOKEN).request(trequest).post_init(post_init).build()
@@ -380,8 +374,6 @@ def main():
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("search", search_account))
     app.add_handler(CommandHandler("users", list_users))
-    
-    # KÍCH HOẠT LỆNH MỚI
     app.add_handler(CommandHandler("export", export_accounts))
     app.add_handler(CommandHandler("clean", clean_accounts))
     
