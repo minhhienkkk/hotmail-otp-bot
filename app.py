@@ -22,7 +22,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- CẤU HÌNH ADMIN VÀ VOLUME ---
 ADMIN_ID = 7965479456  
 # Đã đổi sang đường dẫn Volume của Railway để lưu vĩnh viễn
-APPROVED_USERS_FILE = "/app/data/approved_users.json"
+APPROVED_USERS_FILE = "approved_users.json"
 
 def load_approved_users():
     if os.path.exists(APPROVED_USERS_FILE):
