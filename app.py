@@ -19,9 +19,10 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- CẤU HÌNH ADMIN ---
+# --- CẤU HÌNH ADMIN VÀ VOLUME ---
 ADMIN_ID = 7965479456  
-APPROVED_USERS_FILE = "approved_users.json"
+# Đã đổi sang đường dẫn Volume của Railway để lưu vĩnh viễn
+APPROVED_USERS_FILE = "/app/data/approved_users.json"
 
 def load_approved_users():
     if os.path.exists(APPROVED_USERS_FILE):
@@ -33,6 +34,8 @@ def save_approved_user(user_id):
     users = load_approved_users()
     if user_id not in users:
         users.append(user_id)
+        # Đảm bảo thư mục tồn tại trước khi lưu
+        os.makedirs(os.path.dirname(APPROVED_USERS_FILE), exist_ok=True)
         with open(APPROVED_USERS_FILE, "w") as f:
             json.dump(users, f)
 
@@ -53,7 +56,7 @@ async def post_init(application: Application):
     await application.bot.set_my_commands(commands)
     print("✅ Đã cập nhật Menu lệnh cho Bot thành công!")
 
-# --- HÀM TẠO PASSWORD & TÌM CODE ---
+# --- HÀM TẠO PASSWORD & TÌM CODE (HỖ TRỢ ĐỘ DÀI CODE KHÁC NHAU) ---
 WORDS = ["Tiger", "Ocean", "River", "Falcon", "Dragon", "Coffee", "Crystal", "Shadow", "Thunder", "Rocket", "Silver", "Golden", "Cosmic", "Quantum", "Cyber", "Ninja", "Phoenix", "Galaxy", "Neon", "Mango"]
 
 def generate_hf_password():
@@ -62,20 +65,22 @@ def generate_hf_password():
     special_char = random.choice("!@#$%^&*")
     return f"{word1}{word2}{number}{special_char}"
 
-def find_higgsfield_code(data):
+def find_otp_code(data, keyword, code_length):
+    """Tìm mã theo độ dài quy định của từng web"""
     if isinstance(data, dict):
         for value in data.values():
-            result = find_higgsfield_code(value)
+            result = find_otp_code(value, keyword, code_length)
             if result: return result
     elif isinstance(data, list):
         for item in data:
-            result = find_higgsfield_code(item)
+            result = find_otp_code(item, keyword, code_length)
             if result: return result
     elif isinstance(data, str):
         text_lower = data.lower()
-        if 'higgsfield' in text_lower:
+        if keyword in text_lower:
             clean_text = re.sub(r'<[^>]+>', ' ', data)
-            match = re.search(r'\b\d{6}\b', clean_text)
+            # Biến số lượng số (ví dụ: \b\d{8}\b cho Krea, \b\d{6}\b cho Higgsfield)
+            match = re.search(rf'\b\d{{{code_length}}}\b', clean_text)
             if match: return match.group(0)
     return None
 
@@ -84,7 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if is_allowed(user_id):
         text = (
-            "👋 **Hệ thống Quản lý Higgsfield Bot**\n\n"
+            "👋 **Hệ thống Quản lý OTP Đa Nền Tảng Bot**\n\n"
             "Các lệnh hỗ trợ:\n"
             "📎 Gửi file `.txt` để import acc.\n"
             "📥 `/get` - Lấy 1 tài khoản mới.\n"
@@ -128,7 +133,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if records_to_insert:
             supabase.table("accounts").insert(records_to_insert).execute()
-            await status_msg.edit_text(f"✅ Đã import {len(records_to_insert)} acc kèm Password Higgsfield.")
+            await status_msg.edit_text(f"✅ Đã import {len(records_to_insert)} acc kèm Password.")
         else:
             await status_msg.edit_text("❌ Không tìm thấy dòng đúng định dạng.")
     except Exception as e:
@@ -148,11 +153,13 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             supabase.table("accounts").update({"hf_password": hf_pass}).eq("id", acc['id']).execute()
         
         keyboard = [
-            [InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")],
+            [InlineKeyboardButton("🚀 Code Higgsfield", callback_data=f"gethf_{acc['id']}")],
+            [InlineKeyboardButton("🎨 Code Krea", callback_data=f"getkrea_{acc['id']}"),
+             InlineKeyboardButton("🧊 Code Meshy", callback_data=f"getmeshy_{acc['id']}")],
             [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")]
         ]
         
-        text = f"✅ **Higgsfield**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`"
+        text = f"✅ **TÀI KHOẢN MỚI**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`"
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
@@ -174,10 +181,15 @@ async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         status = "🔴 Đã sử dụng" if acc['is_used'] else "🟢 Chưa sử dụng"
         keyboard = [
-            [InlineKeyboardButton("🚀 Get code Higgsfield", callback_data=f"getcode_{acc['id']}")],
+            [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc['id']}"),
+             InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc['id']}"),
+             InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc['id']}")],
             [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
             [InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]
         ]
+        
+        if acc['is_used']:
+            keyboard.append([InlineKeyboardButton("🔄 Trả về trạng thái CHƯA DÙNG", callback_data=f"unuse_{acc['id']}")])
         
         text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n📌 Trạng thái: {status}"
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -290,6 +302,26 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_allowed(user_id): return await query.answer("⛔ Bạn chưa được cấp quyền dùng bot!", show_alert=True)
 
+    if data.startswith("unuse_"):
+        acc_id = data.split("_")[1]
+        supabase.table("accounts").update({"is_used": False}).eq("id", acc_id).execute()
+        
+        res = supabase.table("accounts").select("*").eq("id", acc_id).execute()
+        acc = res.data[0]
+        
+        keyboard = [
+            [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc['id']}"),
+             InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc['id']}"),
+             InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc['id']}")],
+            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
+            [InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]
+        ]
+        text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{acc['hf_password']}`\n\n📌 Trạng thái: 🟢 Chưa sử dụng"
+        
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await query.answer("✅ Đã trả về trạng thái CHƯA DÙNG!", show_alert=True)
+        return
+
     if data.startswith("copyep_"):
         await query.answer("Đang tạo đoạn copy...")
         acc_id = data.split("_")[1]
@@ -308,45 +340,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"`{acc['email']}|{acc['password']}|{acc['refresh_token']}|{acc['client_id']}`", parse_mode='Markdown')
         return
 
-    if data.startswith("getcode_"):
-        await query.answer("Đang lấy mã...")
-        acc_id = data.split("_")[1]
+    if data.startswith(("gethf_", "getkrea_", "getmeshy_")):
+        await query.answer("Đang check Email...")
+        prefix, acc_id = data.split("_")
+        
+        # Cấu hình Web Name, Từ khóa tìm kiếm, Độ dài Code
+        site_map = {
+            "gethf": ("Higgsfield", "higgsfield", 6),
+            "getkrea": ("Krea.AI", "krea", 8),
+            "getmeshy": ("Meshy.AI", "meshy", 6) # Nếu Meshy không phải 6 số, bạn nhắn để tôi sửa nhé
+        }
+        site_name, keyword, code_length = site_map[prefix]
         
         response = supabase.table("accounts").select("*").eq("id", acc_id).execute()
         if not response.data: return await query.edit_message_text("❌ Không tìm thấy tài khoản.")
         acc = response.data[0]
         
-        hf_pass = acc.get('hf_password')
-        if not hf_pass:
-            hf_pass = generate_hf_password()
-            supabase.table("accounts").update({"hf_password": hf_pass}).eq("id", acc_id).execute()
+        hf_pass = acc.get('hf_password') or generate_hf_password()
 
         api_url = "https://tools.dongvanfb.net/api/get_messages_oauth2"
         payload = {"email": acc['email'], "refresh_token": acc['refresh_token'], "client_id": acc['client_id']}
         
         try:
             api_res = requests.post(api_url, json=payload, timeout=20)
-            
-            if api_res.status_code != 200:
-                raise requests.exceptions.RequestException(f"Lỗi {api_res.status_code}")
+            if api_res.status_code != 200: raise requests.exceptions.RequestException(f"Lỗi {api_res.status_code}")
                 
-            code = find_higgsfield_code(api_res.json())
+            code = find_otp_code(api_res.json(), keyword, code_length)
             
             vn_tz = timezone(timedelta(hours=7))
             current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
             
             keyboard = [
-                [InlineKeyboardButton("🔄 Lấy mã lần nữa", callback_data=f"getcode_{acc_id}")],
+                [InlineKeyboardButton(f"🔄 Lấy mã {site_name} lần nữa", callback_data=f"{prefix}_{acc_id}")],
+                [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc_id}"),
+                 InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc_id}"),
+                 InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc_id}")],
                 [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]
             ]
             
             if code:
                 supabase.table("accounts").update({"is_used": True}).eq("id", acc_id).execute()
-                new_text = (f"✅ **Higgsfield**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n"
+                new_text = (f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n"
                             f"✅ **Code:** `{code}`\n\n⏱️ *Cập nhật lúc: {current_time}*")
                 await query.edit_message_text(new_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             else:
-                await query.edit_message_text(f"✅ **Higgsfield**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
+                await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
                                               f"⚠️ *Chưa thấy mã. Lần check: {current_time}*",
                                               reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
                 
@@ -354,14 +392,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             vn_tz = timezone(timedelta(hours=7))
             current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
             
-            keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"getcode_{acc_id}")],
+            keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"{prefix}_{acc_id}")],
                         [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
-            await query.edit_message_text(f"✅ **Higgsfield**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
+            await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
                                           f"❌ *Lỗi kết nối API. Lần check: {current_time}*", 
                                           reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 def main():
-    # Cấu hình mạng lỏng hơn để chống Timeout (đã gỡ bỏ Proxy)
     trequest = HTTPXRequest(
         connection_pool_size=8,
         read_timeout=30, write_timeout=30, connect_timeout=30, pool_timeout=30
@@ -381,7 +418,6 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
 
     print("🤖 Bot đang hoạt động với cấu hình mạng mới...")
-    # Thêm drop_pending_updates để xóa kẹt lệnh lúc sập server
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
