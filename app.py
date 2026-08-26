@@ -288,58 +288,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
 
-    if data.startswith("approve_") or data.startswith("reject_"):
-        if user_id != ADMIN_ID: return await query.answer("⛔ Bạn không phải Admin!", show_alert=True)
-        target_id = int(data.split("_")[1])
-        if data.startswith("approve_"):
-            save_approved_user(target_id)
-            await query.edit_message_text(f"✅ Đã cấp quyền sử dụng cho ID: `{target_id}`", parse_mode='Markdown')
-            try: await context.bot.send_message(chat_id=target_id, text="🎉 **Admin đã phê duyệt!**\nBạn có thể bắt đầu sử dụng bot bằng cách gõ /start", parse_mode='Markdown')
-            except: pass
-        elif data.startswith("reject_"):
-            await query.edit_message_text(f"❌ Đã từ chối cấp quyền cho ID: `{target_id}`", parse_mode='Markdown')
-        return
-
-    if not is_allowed(user_id): return await query.answer("⛔ Bạn chưa được cấp quyền dùng bot!", show_alert=True)
-
-    if data.startswith("unuse_"):
-        acc_id = data.split("_")[1]
-        supabase.table("accounts").update({"is_used": False}).eq("id", acc_id).execute()
-        
-        res = supabase.table("accounts").select("*").eq("id", acc_id).execute()
-        acc = res.data[0]
-        
-        keyboard = [
-            [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc['id']}"),
-             InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc['id']}"),
-             InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc['id']}")],
-            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
-            [InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]
-        ]
-        text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{acc['hf_password']}`\n\n📌 Trạng thái: 🟢 Chưa sử dụng"
-        
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        await query.answer("✅ Đã trả về trạng thái CHƯA DÙNG!", show_alert=True)
-        return
-
-    if data.startswith("copyep_"):
-        await query.answer("Đang tạo đoạn copy...")
-        acc_id = data.split("_")[1]
-        response = supabase.table("accounts").select("email, password").eq("id", acc_id).execute()
-        if not response.data: return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
-        acc = response.data[0]
-        await query.message.reply_text(f"```text\n📧 {acc['email']}\n🔑 {acc['password']}\n```", parse_mode='MarkdownV2')
-        return
-
-    if data.startswith("raw_"):
-        await query.answer("Đang lấy dữ liệu...")
-        acc_id = data.split("_")[1]
-        response = supabase.table("accounts").select("*").eq("id", acc_id).execute()
-        if not response.data: return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
-        acc = response.data[0]
-        await query.message.reply_text(f"`{acc['email']}|{acc['password']}|{acc['refresh_token']}|{acc['client_id']}`", parse_mode='Markdown')
-        return
-
     if data.startswith(("gethf_", "getkrea_", "getmeshy_")):
         await query.answer("Đang check Email...")
         prefix, acc_id = data.split("_")
@@ -361,6 +309,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             code = None
             api_error = False
+            api_source = ""
+            
+            # Bắt đầu bấm giờ
+            start_time = datetime.now()
 
             # --- 1. GỌI API CHÍNH (getcode.khommo.vn) ---
             try:
@@ -377,14 +329,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if res_primary.status_code == 200:
                     data_primary = res_primary.json()
                     if data_primary.get("success"):
-                        # Dùng luôn hàm find_otp_code cũ để tìm từ kết quả trả về
                         code = find_otp_code(data_primary.get("messages", []), keyword, code_length)
+                        if code:
+                            api_source = "Khommo (imap)"
                     else:
                         # Fallback mode 'graph' nếu 'imap' lỗi kết nối
                         primary_payload["mode"] = "graph"
                         res_graph = requests.post(primary_url, json=primary_payload, timeout=20)
                         if res_graph.status_code == 200 and res_graph.json().get("success"):
                             code = find_otp_code(res_graph.json().get("messages", []), keyword, code_length)
+                            if code:
+                                api_source = "Khommo (graph)"
             except Exception as e:
                 print(f"Lỗi API chính (khommo.vn): {e}")
 
@@ -400,11 +355,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     res_sec = requests.post(sec_url, json=sec_payload, timeout=20)
                     if res_sec.status_code == 200:
                         code = find_otp_code(res_sec.json(), keyword, code_length)
+                        if code:
+                            api_source = "Dongvanfb"
                     else:
                         api_error = True
                 except Exception as e:
                     print(f"Lỗi API phụ (dongvanfb): {e}")
                     api_error = True
+
+            # Kết thúc bấm giờ và tính số giây đã trôi qua
+            elapsed_time = (datetime.now() - start_time).total_seconds()
 
             # --- CẬP NHẬT GIAO DIỆN SAU KHI CÓ KẾT QUẢ ---
             vn_tz = timezone(timedelta(hours=7))
@@ -420,8 +380,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if code:
                 supabase.table("accounts").update({"is_used": True}).eq("id", acc_id).execute()
-                new_text = (f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n"
-                            f"✅ **Code:** `{code}`\n\n⏱️ *Cập nhật lúc: {current_time}*")
+                new_text = (f"✅ **{site_name}**\n\n"
+                            f"📧 `{acc['email']}`\n"
+                            f"🔑 `{acc['password']}`\n"
+                            f"🔐 `{hf_pass}`\n"
+                            f"✅ **Code:** `{code}`\n\n"
+                            f"⚡ *Được cấp bởi {api_source} trong {elapsed_time:.1f}s*\n"
+                            f"⏱️ *Cập nhật lúc: {current_time}*")
                 await query.edit_message_text(new_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             elif api_error:
                 # Nếu cả 2 API đều dính lỗi timeout hoặc không truy cập được
