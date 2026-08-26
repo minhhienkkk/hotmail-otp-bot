@@ -348,7 +348,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         site_map = {
             "gethf": ("Higgsfield", "higgsfield", 6),
             "getkrea": ("Krea.AI", "krea", 8),
-            "getmeshy": ("Meshy.AI", "meshy", 6) # Nếu Meshy không phải 6 số, bạn nhắn để tôi sửa nhé
+            "getmeshy": ("Meshy.AI", "meshy", 6)
         }
         site_name, keyword, code_length = site_map[prefix]
         
@@ -358,15 +358,55 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         hf_pass = acc.get('hf_password') or generate_hf_password()
 
-        api_url = "https://tools.dongvanfb.net/api/get_messages_oauth2"
-        payload = {"email": acc['email'], "refresh_token": acc['refresh_token'], "client_id": acc['client_id']}
-        
         try:
-            api_res = requests.post(api_url, json=payload, timeout=20)
-            if api_res.status_code != 200: raise requests.exceptions.RequestException(f"Lỗi {api_res.status_code}")
+            code = None
+            api_error = False
+
+            # --- 1. GỌI API CHÍNH (getcode.khommo.vn) ---
+            try:
+                primary_url = "https://getcode.khommo.vn/api/v1/read-mail"
+                primary_payload = {
+                    "email": acc['email'],
+                    "refreshToken": acc['refresh_token'],
+                    "clientId": acc['client_id'],
+                    "mode": "imap",
+                    "server": "server2"
+                }
+                res_primary = requests.post(primary_url, json=primary_payload, timeout=20)
                 
-            code = find_otp_code(api_res.json(), keyword, code_length)
-            
+                if res_primary.status_code == 200:
+                    data_primary = res_primary.json()
+                    if data_primary.get("success"):
+                        # Dùng luôn hàm find_otp_code cũ để tìm từ kết quả trả về
+                        code = find_otp_code(data_primary.get("messages", []), keyword, code_length)
+                    else:
+                        # Fallback mode 'graph' nếu 'imap' lỗi kết nối
+                        primary_payload["mode"] = "graph"
+                        res_graph = requests.post(primary_url, json=primary_payload, timeout=20)
+                        if res_graph.status_code == 200 and res_graph.json().get("success"):
+                            code = find_otp_code(res_graph.json().get("messages", []), keyword, code_length)
+            except Exception as e:
+                print(f"Lỗi API chính (khommo.vn): {e}")
+
+            # --- 2. GỌI API PHỤ (dongvanfb) NẾU API CHÍNH KHÔNG TÌM THẤY CODE ---
+            if not code:
+                try:
+                    sec_url = "https://tools.dongvanfb.net/api/get_messages_oauth2"
+                    sec_payload = {
+                        "email": acc['email'], 
+                        "refresh_token": acc['refresh_token'], 
+                        "client_id": acc['client_id']
+                    }
+                    res_sec = requests.post(sec_url, json=sec_payload, timeout=20)
+                    if res_sec.status_code == 200:
+                        code = find_otp_code(res_sec.json(), keyword, code_length)
+                    else:
+                        api_error = True
+                except Exception as e:
+                    print(f"Lỗi API phụ (dongvanfb): {e}")
+                    api_error = True
+
+            # --- CẬP NHẬT GIAO DIỆN SAU KHI CÓ KẾT QUẢ ---
             vn_tz = timezone(timedelta(hours=7))
             current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
             
@@ -383,19 +423,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_text = (f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n"
                             f"✅ **Code:** `{code}`\n\n⏱️ *Cập nhật lúc: {current_time}*")
                 await query.edit_message_text(new_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            elif api_error:
+                # Nếu cả 2 API đều dính lỗi timeout hoặc không truy cập được
+                keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"{prefix}_{acc_id}")],
+                            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
+                await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
+                                              f"❌ *Lỗi kết nối API. Lần check: {current_time}*", 
+                                              reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             else:
                 await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
                                               f"⚠️ *Chưa thấy mã. Lần check: {current_time}*",
                                               reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
                 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
+            print(f"Lỗi toàn cục khi get code: {e}")
             vn_tz = timezone(timedelta(hours=7))
             current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
             
             keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"{prefix}_{acc_id}")],
                         [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
             await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
-                                          f"❌ *Lỗi kết nối API. Lần check: {current_time}*", 
+                                          f"❌ *Lỗi hệ thống ngoại lệ. Lần check: {current_time}*", 
                                           reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 def main():
