@@ -295,8 +295,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     # 3. Bắt các nút phụ (Copy...)
     if data.startswith("copyep_"):
-        return await query.answer("Vui lòng bôi đen và copy tay ở tin nhắn phía trên nhé!", show_alert=True)
-
+        acc_id = data.replace("copyep_", "")
+        
+        # Truy xuất lại thông tin acc từ DB
+        response = supabase.table("accounts").select("email, password").eq("id", acc_id).execute()
+        if not response.data: 
+            return await query.answer("❌ Không tìm thấy tài khoản.", show_alert=True)
+            
+        acc = response.data[0]
+        
+        # Trả lời query để tắt icon loading
+        await query.answer("Đã tạo định dạng Copy dễ dàng!")
+        
+        # Gửi một tin nhắn mới chứa định dạng Monospace (chạm để copy)
+        copy_text = f"`{acc['email']}|{acc['password']}`"
+        return await query.message.reply_text(copy_text, parse_mode='Markdown')
+    
     # 4. Bắt nút Get Code
     if data.startswith(("gethf_", "getkrea_", "getmeshy_")):
         await query.answer("Đang check Email...")
