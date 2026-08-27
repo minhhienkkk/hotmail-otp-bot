@@ -308,7 +308,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Đã tạo định dạng Copy dễ dàng!")
         
         # Gửi một tin nhắn mới chứa định dạng Monospace (chạm để copy)
-        copy_text = f"📧 `{acc['email']}`\n🔑 `{acc['password']}`"
+        copy_text = f"```\n📧 {acc['email']}\n🔑 {acc['password']}\n```"
         return await query.message.reply_text(copy_text, parse_mode='Markdown')
     
     # 4. Bắt nút Get Code
