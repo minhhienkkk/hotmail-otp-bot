@@ -35,6 +35,18 @@ async def post_init(application: Application):
     await application.bot.set_my_commands(commands)
     print("✅ Đã cập nhật Menu lệnh cho Bot thành công!")
 
+    try:
+        vn_tz = timezone(timedelta(hours=7))
+        started_at = datetime.now(vn_tz).strftime("%d/%m/%Y %H:%M:%S")
+        await application.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"✅ **Bot đang chạy**\n🕒 Thời gian: `{started_at}` (GMT+7)",
+            parse_mode="Markdown",
+        )
+        print(f"✅ Đã gửi thông báo khởi động lúc {started_at}")
+    except Exception as e:
+        print(f"⚠️ Không thể gửi thông báo khởi động cho Admin: {e}")
+
 # --- HÀM TẠO PASSWORD & TÌM CODE ---
 WORDS = ["Tiger", "Ocean", "River", "Falcon", "Dragon", "Coffee", "Crystal", "Shadow", "Thunder", "Rocket", "Silver", "Golden", "Cosmic", "Quantum", "Cyber", "Ninja", "Phoenix", "Galaxy", "Neon", "Mango"]
 
