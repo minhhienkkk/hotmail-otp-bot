@@ -147,7 +147,8 @@ async def execute_search(message, keyword):
             [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc['id']}"),
              InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc['id']}"),
              InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc['id']}")],
-            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")]
+            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
+            [InlineKeyboardButton("📦 Copy định dạng gốc", callback_data=f"copyraw_{acc['id']}")]
         ]
         
         text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n📌 Trạng thái: {status}"
@@ -306,6 +307,26 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     # 3. Bắt các nút phụ (Copy...)
+    if data.startswith("copyraw_"):
+        acc_id = data.replace("copyraw_", "")
+
+        response = supabase.table("accounts").select(
+            "email, password, refresh_token, client_id"
+        ).eq("id", acc_id).execute()
+        if not response.data:
+            return await query.answer("❌ Không tìm thấy tài khoản.", show_alert=True)
+
+        acc = response.data[0]
+        await query.answer("Đã tạo định dạng gốc!")
+
+        raw_account = (
+            f"{acc['email']}|{acc['password']}|"
+            f"{acc['refresh_token']}|{acc['client_id']}"
+        )
+        return await query.message.reply_text(
+            f"```\n{raw_account}\n```", parse_mode="Markdown"
+        )
+
     if data.startswith("copyep_"):
         acc_id = data.replace("copyep_", "")
         
