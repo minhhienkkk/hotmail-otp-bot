@@ -45,7 +45,6 @@ def generate_hf_password():
     return f"{word1}{word2}{number}{special_char}"
 
 def find_otp_code(data, keyword, code_length):
-    """Tìm mã theo độ dài quy định của từng web"""
     if isinstance(data, dict):
         for value in data.values():
             result = find_otp_code(value, keyword, code_length)
@@ -68,19 +67,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 **Hệ thống Quản lý OTP Đa Nền Tảng Bot**\n\n"
         "Các lệnh hỗ trợ:\n"
         "📥 `/get` - Lấy 1 tài khoản mới.\n"
-        "🔍 `/search <email>` - Tìm nhanh acc.\n"
+        "🔍 `/search` - Tìm nhanh acc.\n"
         "📊 `/stats` - Xem thống kê.\n"
     )
-    
-    # Hiển thị thêm menu Admin nếu đúng người
     if update.effective_user.id == ADMIN_ID:
         text += (
             "\n👑 **Lệnh dành cho Admin:**\n"
             "📎 Gửi file `.txt` để import acc.\n"
-            "📥 `/export <all/used/unused>` - Xuất file.\n"
-            "🧹 `/clean <used/unused>` - Xóa dữ liệu.\n"
+            "📥 `/export` - Xuất file.\n"
+            "🧹 `/clean` - Xóa dữ liệu.\n"
         )
-        
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,7 +85,6 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response.data: return await update.message.reply_text("⚠️ Hết tài khoản khả dụng!")
             
         acc = response.data[0]
-        
         hf_pass = acc.get('hf_password')
         if not hf_pass:
             hf_pass = generate_hf_password()
@@ -107,13 +102,27 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
+# --- HỖ TRỢ QUICK MENU CHO SEARCH ---
 async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: return await update.message.reply_text("⚠️ Vui lòng nhập từ khóa.\n👉 Cú pháp: `/search <từ_khóa>`")
-
+    if not context.args:
+        # Kích hoạt trạng thái chờ nhập text
+        context.user_data['awaiting_search'] = True
+        return await update.message.reply_text("🔍 **Vui lòng gửi email hoặc từ khóa bạn muốn tìm:**\n_(Ví dụ: congnghe, pro, v.v.)_", parse_mode='Markdown')
+    
     keyword = context.args[0]
+    await execute_search(update.message, keyword)
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bắt các tin nhắn dạng text thông thường (nếu user đang trong trạng thái chờ search)"""
+    if context.user_data.get('awaiting_search'):
+        context.user_data['awaiting_search'] = False
+        keyword = update.message.text.strip()
+        await execute_search(update.message, keyword)
+
+async def execute_search(message, keyword):
     try:
         response = supabase.table("accounts").select("*").ilike("email", f"{keyword}%").limit(1).execute()
-        if not response.data: return await update.message.reply_text(f"❌ Không tìm thấy email nào bắt đầu bằng `{keyword}`")
+        if not response.data: return await message.reply_text(f"❌ Không tìm thấy email nào bắt đầu bằng `{keyword}`")
 
         acc = response.data[0]
         hf_pass = acc.get('hf_password')
@@ -126,17 +135,13 @@ async def search_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc['id']}"),
              InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc['id']}"),
              InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc['id']}")],
-            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
-            [InlineKeyboardButton("📋 Lấy định dạng Copy gốc", callback_data=f"raw_{acc['id']}")]
+            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")]
         ]
         
-        if acc['is_used']:
-            keyboard.append([InlineKeyboardButton("🔄 Trả về trạng thái CHƯA DÙNG", callback_data=f"unuse_{acc['id']}")])
-        
         text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n📌 Trạng thái: {status}"
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi: {str(e)}")
+        await message.reply_text(f"❌ Lỗi: {str(e)}")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -149,7 +154,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
-# --- HANDLERS DÀNH CHO ADMIN (BẢO MẬT) ---
+# --- HỖ TRỢ QUICK MENU CHO ADMIN ---
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     
@@ -178,13 +183,22 @@ async def export_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: 
         return await update.message.reply_text("⛔ Chỉ Admin mới có quyền sử dụng lệnh này.")
         
-    if not context.args or context.args[0] not in ['used', 'unused', 'all']:
-        text = "⚠️ **Vui lòng chọn loại tài khoản muốn xuất:**\n👉 `/export unused` (Chưa dùng)\n👉 `/export used` (Đã dùng)\n👉 `/export all` (Tất cả)"
-        return await update.message.reply_text(text, parse_mode='Markdown')
-
+    if not context.args:
+        # Nếu gõ /export không kèm tham số -> Hiện nút bấm
+        keyboard = [
+            [InlineKeyboardButton("📦 Xuất Tất Cả", callback_data="export_all")],
+            [InlineKeyboardButton("🟢 Xuất Chưa dùng", callback_data="export_unused"),
+             InlineKeyboardButton("🔴 Xuất Đã dùng", callback_data="export_used")]
+        ]
+        return await update.message.reply_text("📥 Bạn muốn xuất loại tài khoản nào?", reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    # Hỗ trợ gõ lệnh /export unused như cũ
     export_type = context.args[0]
-    status_msg = await update.message.reply_text("⏳ Đang trích xuất dữ liệu, vui lòng chờ...")
+    if export_type in ['used', 'unused', 'all']:
+        await execute_export(update.message, export_type, context)
 
+async def execute_export(message, export_type, context):
+    status_msg = await message.reply_text("⏳ Đang trích xuất dữ liệu, vui lòng chờ...")
     try:
         if export_type == 'unused':
             response = supabase.table("accounts").select("*").eq("is_used", False).execute()
@@ -206,7 +220,8 @@ async def export_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(file_name, 'w', encoding='utf-8') as f:
             f.write(file_content)
 
-        await update.message.reply_document(
+        await context.bot.send_document(
+            chat_id=message.chat_id,
             document=open(file_name, 'rb'),
             filename=file_name,
             caption=f"✅ Đã xuất thành công **{len(accounts)}** tài khoản ({export_type}).",
@@ -218,18 +233,27 @@ async def export_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await status_msg.edit_text(f"❌ Lỗi xuất file: {str(e)}")
 
+
 async def clean_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: 
         return await update.message.reply_text("⛔ Chỉ Admin mới có quyền sử dụng lệnh này.")
         
-    if not context.args or context.args[0] not in ['used', 'unused']:
-        text = "⚠️ **Vui lòng chọn loại tài khoản cần xóa:**\n👉 `/clean unused` (Xóa sạch acc CHƯA DÙNG)\n👉 `/clean used` (Xóa sạch acc ĐÃ DÙNG)"
-        return await update.message.reply_text(text, parse_mode='Markdown')
+    if not context.args:
+        # Nếu gõ /clean không kèm tham số -> Hiện nút bấm
+        keyboard = [
+            [InlineKeyboardButton("🧹 Xóa acc Chưa dùng", callback_data="clean_unused")],
+            [InlineKeyboardButton("🧹 Xóa acc Đã dùng", callback_data="clean_used")],
+            [InlineKeyboardButton("❌ Hủy thao tác", callback_data="clean_cancel")]
+        ]
+        return await update.message.reply_text("⚠️ **CẢNH BÁO:** Bạn muốn xóa sạch loại tài khoản nào khỏi database?", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     clean_type = context.args[0]
-    is_used_val = True if clean_type == 'used' else False
-    status_msg = await update.message.reply_text("⏳ Đang tiến hành dọn dẹp Database...")
+    if clean_type in ['used', 'unused']:
+        await execute_clean(update.message, clean_type)
 
+async def execute_clean(message, clean_type):
+    is_used_val = True if clean_type == 'used' else False
+    status_msg = await message.reply_text("⏳ Đang tiến hành dọn dẹp Database...")
     try:
         res = supabase.table("accounts").select("id", count="exact").eq("is_used", is_used_val).execute()
         count = res.count if res.count else 0
@@ -244,11 +268,36 @@ async def clean_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await status_msg.edit_text(f"❌ Lỗi khi xóa: {str(e)}")
 
-# --- XỬ LÝ NÚT BẤM (CÔNG KHAI) ---
+# --- XỬ LÝ NÚT BẤM CỦA QUICK MENU VÀ GET CODE ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
 
+    # 1. Bắt nút bấm của Admin (/export)
+    if data.startswith("export_"):
+        if update.effective_user.id != ADMIN_ID:
+            return await query.answer("⛔ Bạn không phải Admin!", show_alert=True)
+        export_type = data.replace("export_", "")
+        await query.answer()
+        await execute_export(query.message, export_type, context)
+        return
+
+    # 2. Bắt nút bấm của Admin (/clean)
+    if data.startswith("clean_"):
+        if update.effective_user.id != ADMIN_ID:
+            return await query.answer("⛔ Bạn không phải Admin!", show_alert=True)
+        clean_type = data.replace("clean_", "")
+        if clean_type == "cancel":
+            return await query.edit_message_text("✅ Đã hủy thao tác xóa.")
+        await query.answer()
+        await execute_clean(query.message, clean_type)
+        return
+        
+    # 3. Bắt các nút phụ (Copy...)
+    if data.startswith("copyep_"):
+        return await query.answer("Vui lòng bôi đen và copy tay ở tin nhắn phía trên nhé!", show_alert=True)
+
+    # 4. Bắt nút Get Code
     if data.startswith(("gethf_", "getkrea_", "getmeshy_")):
         await query.answer("Đang check Email...")
         prefix, acc_id = data.split("_")
@@ -371,15 +420,19 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("get", get_account))
     app.add_handler(CommandHandler("stats", stats))
+    
+    # Các lệnh có menu
     app.add_handler(CommandHandler("search", search_account))
-    # Lệnh cho admin
     app.add_handler(CommandHandler("export", export_accounts))
     app.add_handler(CommandHandler("clean", clean_accounts))
+    
+    # Bắt chữ từ bàn phím để phục vụ cho lệnh Search
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    print("🤖 Bot đang hoạt động (Public Mode)...")
+    print("🤖 Bot đang hoạt động với Menu tiện ích...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
