@@ -3,6 +3,7 @@ import re
 import json
 import random
 import requests
+from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
@@ -106,7 +107,8 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🚀 Code Higgsfield", callback_data=f"gethf_{acc['id']}")],
             [InlineKeyboardButton("🎨 Code Krea", callback_data=f"getkrea_{acc['id']}"),
              InlineKeyboardButton("🧊 Code Meshy", callback_data=f"getmeshy_{acc['id']}")],
-            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")]
+            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
+            [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc['id']}")]
         ]
         
         text = f"✅ **TÀI KHOẢN MỚI**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`"
@@ -148,7 +150,8 @@ async def execute_search(message, keyword):
              InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc['id']}"),
              InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc['id']}")],
             [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc['id']}")],
-            [InlineKeyboardButton("📦 Copy định dạng gốc", callback_data=f"copyraw_{acc['id']}")]
+            [InlineKeyboardButton("📦 Copy định dạng gốc", callback_data=f"copyraw_{acc['id']}")],
+            [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc['id']}")]
         ]
         
         text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n📌 Trạng thái: {status}"
@@ -281,10 +284,55 @@ async def execute_clean(message, clean_type):
     except Exception as e:
         await status_msg.edit_text(f"❌ Lỗi khi xóa: {str(e)}")
 
+async def skip_mail(query):
+    await query.answer("Đang skip mail...")
+    acc_id = query.data.removeprefix("skipmail_")
+    try:
+        response = supabase.table("accounts").select("*").eq("id", acc_id).execute()
+        if not response.data:
+            return await query.message.reply_text("❌ Không tìm thấy tài khoản.")
+
+        acc = response.data[0]
+        raw_account = (
+            f"{acc['email']}|{acc['password']}|"
+            f"{acc['refresh_token']}|{acc['client_id']}\n"
+        )
+        result = supabase.table("accounts").update({"is_used": True}).eq("id", acc_id).execute()
+        if not result.data:
+            return await query.message.reply_text("❌ Không thể đánh dấu done: tài khoản không còn tồn tại.")
+    except Exception:
+        return await query.message.reply_text("❌ Chưa thể đánh dấu done mail. Vui lòng bấm Skip mail để thử lại.")
+
+    try:
+        with BytesIO(raw_account.encode("utf-8")) as document:
+            await query.message.reply_document(
+                document=document,
+                filename=f"Skip_mail_{acc['id']}.txt",
+                caption=f"✅ Đã skip và đánh dấu DONE mail: {acc['email']}",
+            )
+    except Exception:
+        return await query.message.reply_text(
+            "⚠️ Mail đã được đánh dấu DONE nhưng chưa gửi được file. "
+            "Bấm Skip mail lần nữa để gửi lại file."
+        )
+
+    try:
+        await query.edit_message_text(
+            f"✅ Đã skip và đánh dấu DONE mail: {acc['email']}\n"
+            "📎 Đã gửi file mail ở tin nhắn bên dưới. Dùng /get để lấy mail tiếp theo.",
+        )
+    except Exception:
+        # File và trạng thái DONE đã được lưu thành công dù không sửa được tin nhắn cũ.
+        pass
+
+
 # --- XỬ LÝ NÚT BẤM CỦA QUICK MENU VÀ GET CODE ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
+
+    if data.startswith("skipmail_"):
+        return await skip_mail(query)
 
     # 1. Bắt nút bấm của Admin (/export)
     if data.startswith("export_"):
@@ -422,7 +470,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🚀 Higgsfield", callback_data=f"gethf_{acc_id}"),
                  InlineKeyboardButton("🎨 Krea", callback_data=f"getkrea_{acc_id}"),
                  InlineKeyboardButton("🧊 Meshy", callback_data=f"getmeshy_{acc_id}")],
-                [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]
+                [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")],
+                [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc_id}")]
             ]
             
             if code:
@@ -437,7 +486,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(new_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             elif api_error:
                 keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"{prefix}_{acc_id}")],
-                            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
+                            [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")],
+                            [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc_id}")]]
                 await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
                                               f"❌ *Lỗi kết nối API. Lần check: {current_time}*", 
                                               reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -451,7 +501,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             vn_tz = timezone(timedelta(hours=7))
             current_time = datetime.now(vn_tz).strftime("%H:%M:%S")
             keyboard = [[InlineKeyboardButton("🔄 Thử lại", callback_data=f"{prefix}_{acc_id}")],
-                        [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")]]
+                        [InlineKeyboardButton("📋 Copy Email & Pass", callback_data=f"copyep_{acc_id}")],
+                        [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc_id}")]]
             await query.edit_message_text(f"✅ **{site_name}**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n"
                                           f"❌ *Lỗi hệ thống. Lần check: {current_time}*", 
                                           reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
