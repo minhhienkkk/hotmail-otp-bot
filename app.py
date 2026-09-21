@@ -111,7 +111,17 @@ async def get_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc['id']}")]
         ]
         
-        text = f"✅ **TÀI KHOẢN MỚI**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`"
+        recovery_email_text = ""
+        if acc.get('recovery_email'):
+            recovery_email_text = f"\n📬 Email phụ: `{acc['recovery_email']}`"
+
+        text = (
+            f"✅ **TÀI KHOẢN MỚI**\n\n"
+            f"📧 `{acc['email']}`\n"
+            f"🔑 `{acc['password']}`\n"
+            f"🔐 `{hf_pass}`"
+            f"{recovery_email_text}"
+        )
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
@@ -154,7 +164,11 @@ async def execute_search(message, keyword):
             [InlineKeyboardButton("⏭ Skip mail", callback_data=f"skipmail_{acc['id']}")]
         ]
         
-        text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`\n\n📌 Trạng thái: {status}"
+        recovery_email_text = ""
+        if acc.get('recovery_email'):
+            recovery_email_text = f"\n📬 Email phụ: `{acc['recovery_email']}`"
+
+        text = f"🔍 **KẾT QUẢ TÌM KIẾM**\n\n📧 `{acc['email']}`\n🔑 `{acc['password']}`\n🔐 `{hf_pass}`{recovery_email_text}\n\n📌 Trạng thái: {status}"
         await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await message.reply_text(f"❌ Lỗi: {str(e)}")
@@ -182,10 +196,21 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(document.file_id)
         content = (await file.download_as_bytearray()).decode('utf-8').splitlines()
         
-        records_to_insert = [
-            {"email": p[0], "password": p[1], "refresh_token": p[2], "client_id": p[3], "is_used": False, "hf_password": generate_hf_password()}
-            for line in content if len(p := line.strip().split('|')) == 4
-        ]
+        records_to_insert = []
+        for line in content:
+            parts = [part.strip() for part in line.strip().split('|')]
+            if len(parts) not in (4, 5) or not all(parts[:4]):
+                continue
+
+            records_to_insert.append({
+                "email": parts[0],
+                "password": parts[1],
+                "refresh_token": parts[2],
+                "client_id": parts[3],
+                "recovery_email": parts[4] if len(parts) == 5 and parts[4] else None,
+                "is_used": False,
+                "hf_password": generate_hf_password(),
+            })
         
         if records_to_insert:
             supabase.table("accounts").insert(records_to_insert).execute()
@@ -226,7 +251,12 @@ async def execute_export(message, export_type, context):
         accounts = response.data
         if not accounts: return await status_msg.edit_text(f"📂 Không có tài khoản nào trong danh mục `{export_type}`.", parse_mode='Markdown')
 
-        lines = [f"{acc['email']}|{acc['password']}|{acc['refresh_token']}|{acc['client_id']}" for acc in accounts]
+        lines = []
+        for acc in accounts:
+            fields = [acc['email'], acc['password'], acc['refresh_token'], acc['client_id']]
+            if acc.get('recovery_email'):
+                fields.append(acc['recovery_email'])
+            lines.append('|'.join(fields))
         file_content = "\n".join(lines)
         
         vn_tz = timezone(timedelta(hours=7))
@@ -295,8 +325,11 @@ async def skip_mail(query):
         acc = response.data[0]
         raw_account = (
             f"{acc['email']}|{acc['password']}|"
-            f"{acc['refresh_token']}|{acc['client_id']}\n"
+            f"{acc['refresh_token']}|{acc['client_id']}"
         )
+        if acc.get('recovery_email'):
+            raw_account += f"|{acc['recovery_email']}"
+        raw_account += "\n"
         result = supabase.table("accounts").update({"is_used": True}).eq("id", acc_id).execute()
         if not result.data:
             return await query.message.reply_text("❌ Không thể đánh dấu done: tài khoản không còn tồn tại.")
@@ -359,7 +392,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         acc_id = data.replace("copyraw_", "")
 
         response = supabase.table("accounts").select(
-            "email, password, refresh_token, client_id"
+            "email, password, refresh_token, client_id, recovery_email"
         ).eq("id", acc_id).execute()
         if not response.data:
             return await query.answer("❌ Không tìm thấy tài khoản.", show_alert=True)
@@ -371,6 +404,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{acc['email']}|{acc['password']}|"
             f"{acc['refresh_token']}|{acc['client_id']}"
         )
+        if acc.get('recovery_email'):
+            raw_account += f"|{acc['recovery_email']}"
         return await query.message.reply_text(
             f"```\n{raw_account}\n```", parse_mode="Markdown"
         )
