@@ -336,12 +336,21 @@ async def skip_mail(query):
     except Exception:
         return await query.message.reply_text("❌ Chưa thể đánh dấu done mail. Vui lòng bấm Skip mail để thử lại.")
 
+    email_code = str(acc['email']).replace('\\', '\\\\').replace('`', '\\`')
+    password_code = str(acc['password']).replace('\\', '\\\\').replace('`', '\\`')
+    skip_message = (
+        "✅ Đã skip và đánh dấu DONE mail\n"
+        f"📧 `{email_code}`\n"
+        f"🔑 `{password_code}`"
+    )
+
     try:
         with BytesIO(raw_account.encode("utf-8")) as document:
             await query.message.reply_document(
                 document=document,
                 filename=f"Skip_mail_{acc['id']}.txt",
-                caption=f"✅ Đã skip và đánh dấu DONE mail: {acc['email']}",
+                caption=skip_message,
+                parse_mode='MarkdownV2',
             )
     except Exception:
         return await query.message.reply_text(
@@ -351,8 +360,9 @@ async def skip_mail(query):
 
     try:
         await query.edit_message_text(
-            f"✅ Đã skip và đánh dấu DONE mail: {acc['email']}\n"
-            "📎 Đã gửi file mail ở tin nhắn bên dưới. Dùng /get để lấy mail tiếp theo.",
+            f"{skip_message}\n\n"
+            "📎 Đã gửi file mail ở tin nhắn bên dưới\\. Dùng /get để lấy mail tiếp theo\\.",
+            parse_mode='MarkdownV2',
         )
     except Exception:
         # File và trạng thái DONE đã được lưu thành công dù không sửa được tin nhắn cũ.
