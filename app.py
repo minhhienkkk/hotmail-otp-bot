@@ -340,8 +340,10 @@ async def skip_mail(query):
     password_code = str(acc['password']).replace('\\', '\\\\').replace('`', '\\`')
     skip_message = (
         "✅ Đã skip và đánh dấu DONE mail\n"
-        f"📧 `{email_code}`\n"
-        f"🔑 `{password_code}`\n\n"
+        "```\n"
+        f"📧 {email_code}\n"
+        f"🔑 {password_code}\n"
+        "```\n\n"
         "Dùng /get để lấy mail tiếp theo\\."
     )
 
