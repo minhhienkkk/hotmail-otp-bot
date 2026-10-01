@@ -6,7 +6,7 @@ import requests
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, InputMediaDocument
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 from supabase import create_client, Client
@@ -341,33 +341,26 @@ async def skip_mail(query):
     skip_message = (
         "✅ Đã skip và đánh dấu DONE mail\n"
         f"📧 `{email_code}`\n"
-        f"🔑 `{password_code}`"
+        f"🔑 `{password_code}`\n\n"
+        "Dùng /get để lấy mail tiếp theo\\."
     )
 
     try:
         with BytesIO(raw_account.encode("utf-8")) as document:
-            await query.message.reply_document(
-                document=document,
-                filename=f"Skip_mail_{acc['id']}.txt",
-                caption=skip_message,
-                parse_mode='MarkdownV2',
+            await query.edit_message_media(
+                media=InputMediaDocument(
+                    media=document,
+                    filename=f"Skip_mail_{acc['id']}.txt",
+                    caption=skip_message,
+                    parse_mode='MarkdownV2',
+                ),
+                reply_markup=None,
             )
     except Exception:
         return await query.message.reply_text(
             "⚠️ Mail đã được đánh dấu DONE nhưng chưa gửi được file. "
             "Bấm Skip mail lần nữa để gửi lại file."
         )
-
-    try:
-        await query.edit_message_text(
-            f"{skip_message}\n\n"
-            "📎 Đã gửi file mail ở tin nhắn bên dưới\\. Dùng /get để lấy mail tiếp theo\\.",
-            parse_mode='MarkdownV2',
-        )
-    except Exception:
-        # File và trạng thái DONE đã được lưu thành công dù không sửa được tin nhắn cũ.
-        pass
-
 
 # --- XỬ LÝ NÚT BẤM CỦA QUICK MENU VÀ GET CODE ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
